@@ -1,21 +1,26 @@
 import re
 import pandas as pd
-from sqlalchemy import create_engine, update, MetaData, text,select, Table, Column, String, Integer
+from sqlalchemy import create_engine, update, MetaData, text,select, Table, Column, String, Integer,insert
 import logging
 import numpy as np
 import json
-import pymysql
+
 from bs4 import BeautifulSoup
 
 logging.basicConfig(filename="newlog.txt", level=logging.DEBUG)
 
+import time 
+
+start_time = time.time()
+
 # infodf = pd.read_excel('Meta_H1_Info-121123.xlsx')
-infodf = pd.read_excel('GuardianDigital-Workbook-New-Website-Plan-Draft-011124.xlsx')
+infodf = pd.read_excel('new.xlsx',"New Website Plan Draft")
 # mapdf = pd.read_excel('Guardian Digital - Workbook(2).xlsx', 'Meta Data Mapping')
 # mapdf = pd.read_excel('GuardianDigital-Workbook-121123.xlsx', 'Meta Data Mapping')
-mapdf = pd.read_excel('GuardianDigital-Workbook-Metadata-Mapping-011124.xlsx', 'Meta Data Mapping')
+mapdf = pd.read_excel('new.xlsx', 'Meta Data Mapping')
 infodf.columns = infodf.iloc[0]
 infodf = infodf.iloc[1:]
+
 infodf['map_id'] = infodf.index + 2
 infodf['map_data'] = ''
 infodf['meta_tag'] = False
@@ -29,12 +34,20 @@ infodf['H1_tag'] = False
 #     'port': 3306,
 #     'database': "###"
 # }
+
+# conn_params = {
+#     'user': "gdjoomla",
+#     'password': "XXXXX",
+#     'host': "havoc.guardiandigital.com",
+#     'port': 3306,
+#     'database': "gdv4webstagej4"
+# }
 conn_params = {
-    'user': "gdjoomla",
-    'password': "XXXXX",
-    'host': "havoc.guardiandigital.com",
+    'user': "root",
+    'password': "1234",
+    'host': "127.0.0.1",
     'port': 3306,
-    'database': "gdv4webstagej4"
+    'database': "test"
 }
 
 # Establish a connection
@@ -52,12 +65,16 @@ edocman_categories_table = pd.read_sql_query(text("SELECT * FROM w5zxq_edocman_c
 categories_table = pd.read_sql_query(text("SELECT * FROM w5zxq_categories"), conn)
 casestudies_table = pd.read_sql_query(text("SELECT * FROM w5zxq_casestudies_iq"), conn)
 modules_table = pd.read_sql_query(text("SELECT * FROM w5zxq_modules where module='mod_header_iq' "), conn)
+fields_values_table = pd.read_sql_query(text("SELECT * FROM w5zxq_fields_values"), conn)
+
 
 infodf['Inspiration / Current URL (if existing page)'] = infodf['Inspiration / Current URL (if existing page)'].fillna('')
 infodf['Old H1'] = infodf['Old H1'].fillna('')
 infodf['New Header (H1)'] = infodf['New Header (H1)'].fillna('')
 infodf['Old Title'] = infodf['Old Title'].fillna('')
 infodf['New Title'] = infodf['New Title'].fillna('')
+
+
 
 infodf.replace({np.nan: ''}, inplace=True)
 
@@ -67,12 +84,12 @@ infodf['URL'] = infodf['URL'].fillna('')
 
 infodf['Old Metas'] = infodf['Old Metas'].apply(lambda x: x.replace('\\n', '\n').replace('\\r', '\r'))
 
-infodf['Extracted Text'] = infodf['Inspiration / Current URL (if existing page)'].apply(lambda url: url.split('/')[-1])
-
+infodf['Extracted Text'] = infodf['Inspiration / Current URL (if existing page)'].apply(lambda url: url.split('/')[-1])  
 map_dic = {}
-for i, vals in mapdf.iterrows():
-
+for i, vals in mapdf.iterrows(): 
     if '-' in str(vals['Rows']):
+        if vals["Rows"] == "-":
+            continue 
         strat = int(vals['Rows'].split('-')[0])
         end = int(vals['Rows'].split('-')[1])
 
@@ -84,10 +101,12 @@ for i, vals in mapdf.iterrows():
 # Initialize a list to store the link values
 Meta_link_values = []
 H1_link_values = []
+Article_link_values = []
 
 for i, extracted_text in infodf.iterrows():
     Meta_link_value = ''
     H1_link_value = ''
+    Article_link_value = ''
     
     if extracted_text['map_id'] in map_dic:
         if extracted_text['map_id'] == 345:
@@ -134,9 +153,11 @@ for i, extracted_text in infodf.iterrows():
             try:
                 id_content = content_table.loc[content_table['alias'] == extracted_text['Extracted Text'], 'id'].values[0]
                 Meta_link_value = f'index.php?option=com_content&view=article&id={id_content}'
+                Article_link_value  =f'index.php?option=com_content&view=article&id={id_content}'
 
             except:
                 Meta_link_value = ''
+                Article_link_value   = ''
         elif 'w5zxq_edocman_categories' in map_dic[extracted_text['map_id']][2] and extracted_text['Extracted Text'] in edocman_categories_table['alias'].values:
             infodf.loc[i, 'meta_tag'] = True
             try:
@@ -151,7 +172,7 @@ for i, extracted_text in infodf.iterrows():
                 Meta_link_value = f'index.php?option=com_casestudies_iq&view=casestudies&id={id_casestudios}'
             except:
                 Meta_link_value = ''
-
+    
         else:
             infodf.loc[i, 'meta_tag'] = False
             Meta_link_value = ''
@@ -166,7 +187,7 @@ for i, extracted_text in infodf.iterrows():
                 H1_link_value_id = menu_table.loc[(menu_table['alias'] == extracted_text['Extracted Text']) & (menu_table['path'] == extracted_text['Inspiration / Current URL (if existing page)'].split('.com/')[-1]), 'id'].values[0]
                 # print(metaMetaTable)
                 H1_link_value = f'index.php?option=com_menu&view=metadescription&id={H1_link_value_id}'
-
+ 
             except Exception as e:
                 H1_link_value = ''
         elif 'w5zxq_content' in map_dic[extracted_text['map_id']][1] and extracted_text['Extracted Text'] in content_table['alias'].values:
@@ -212,20 +233,34 @@ for i, extracted_text in infodf.iterrows():
 
     Meta_link_values.append(Meta_link_value)
     H1_link_values.append(H1_link_value)
+    Article_link_values.append(Article_link_value)
+
 
 print("Meta Description is updated")
-    
+
+
 # Add the link_values list as a new column in infodf
 infodf['Meta_Link'] = Meta_link_values
 infodf['H1_Link'] = H1_link_values
+infodf['Article_Link'] = Article_link_values
+
 # Extract values for 'id' and 'com' columns from the 'Link' column
 infodf['H1_id'] = infodf['H1_Link'].apply(lambda link: link.split('=')[-1] if '=' in link else '')
 infodf['H1_com'] = infodf['H1_Link'].apply(lambda link: 'w5zxq_' + link.split('com_')[1].split('&')[0]  if 'com_' in link else '')
-infodf['Meta_id'] = infodf['Meta_Link'].apply(lambda link: link.split('=')[-1] if '=' in link else '')
+infodf['Meta_id'] = infodf['Meta_Link'].apply(lambda link : link.split('=')[-1] if '=' in link else '')
 infodf['Meta_com'] = infodf['Meta_Link'].apply(lambda link: 'w5zxq_' + link.split('com_')[1].split('&')[0]  if 'com_' in link else '')
+infodf['Article_link'] = infodf['Article_Link'].apply(lambda link: 'w5zxq_' + link.split('com_')[1].split('&')[0]  if 'com_'  and 'content' in link else '')
+infodf['Article_id'] = infodf['Article_Link'].apply(lambda link: link.split('=')[-1] if '=' in link else '')
+article_ids =[]
+for article_id in infodf['Article_id']:
+    article_ids.append(article_id)
+    print(article_id)
+
 
 infodf['H1_Updated_DB'] = False
 infodf['Meta_Updated_DB'] = False
+
+infodf['Fields_Tables_D'] = False
 
 infodf.to_csv('file_name55.csv')
 #print(infodf)
@@ -238,6 +273,14 @@ updated_values = set()
 w5zxq_modules = meta.tables['w5zxq_modules']
 
 logging.info(f'\t\t\t\t\t\tOLD\t\t\t\t\t\t\t\t\tNew')
+
+
+
+
+
+
+# def update_fields_values_table()
+        
 
 
 for h1_id_value, h1_com_value, meta_id_value, meta_com_value, map_id, map_data, meta_tag, H1_tag, new_H1, old_h1, new_title, old_title, old_Meta, New_Meta in zip( 
@@ -493,7 +536,7 @@ for h1_id_value, h1_com_value, meta_id_value, meta_com_value, map_id, map_data, 
 
                         oldMeta = json.loads(params)
                         newMeta = New_Meta
-                        if newMeta[-1] == '"':
+                        if   newMeta[-1] == '"':
                             newMeta = newMeta[:-1]
                         oldMeta['menu-meta_description'] = newMeta
 
@@ -538,8 +581,35 @@ for h1_id_value, h1_com_value, meta_id_value, meta_com_value, map_id, map_data, 
                             # with engine.begin() as connection:
                     #     connection.execute(update_stmt)
 
+
+
+        # if meta_com_value and meta_id_value.isdigit():
+
     except pd.io.sql.DatabaseError as e:
         print(f"Error executing query for table '{h1_com_value}': {e}")
+
+
+
+def update_fields_values_table(article_ids):
+    for i in article_ids:
+        if i == "":
+            continue
+        else:
+            new_title = infodf['New Title'][int(i)]
+            infodf["field_id"] = 2
+            table = meta.tables['w5zxq_fields_values']
+            
+            insert_query = insert(table).values(field_id=2, item_id=i, value=new_title)
+            
+            # Start a transaction
+            with engine.begin() as conn:
+                result = conn.execute(insert_query)
+                
+            # Commit the transaction
+            conn.commit()
+
+update_fields_values_table(article_ids)
+
 
 print("Text and Titles are upadted in DB")
 
@@ -547,5 +617,16 @@ print("Text and Titles are upadted in DB")
 connection.commit()
 # Close the cursor and connection
 conn.close()
+end_time = time.time()
+
+print("time: ",end_time - start_time)
 
 infodf.to_csv('file_name55.csv')
+
+
+
+
+
+
+
+
